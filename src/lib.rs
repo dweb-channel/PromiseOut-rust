@@ -154,6 +154,16 @@ fn test_promise_out_resolve() {
 
 #[allow(unused_must_use)]
 #[test]
+fn test_promise_resolve_twice() {
+    let a: Promise<String, String> = Promise::default();
+    let b = a.clone();
+    a.resolve("hi".into());
+    // Not possible. a is consumed.
+    // a.resolve("hi".into());
+}
+
+#[allow(unused_must_use)]
+#[test]
 fn test_two_promises_out_resolve() {
     let op: Promise<String, String> = Promise::default();
     let op_a = op.clone();
