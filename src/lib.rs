@@ -5,7 +5,7 @@ use std::{future::Future, task::Poll};
 pub mod promise_out;
 pub mod pair;
 
-///promiseOut
+///promise
 ///
 /// # Examples
 ///
@@ -13,8 +13,13 @@ pub mod pair;
 /// use promise_out::Promise;
 /// let op: Promise<String,String> = Promise::default();
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Promise<T, E> {
+    promise: Arc<Mutex<Inner<T, E>>>,
+}
+
+#[derive(Clone)]
+pub struct Consumer<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
@@ -82,6 +87,16 @@ impl<T, E> Promise<T, E> {
             waker.wake()
         }
     }
+
+    /// promise.clone
+    ///
+    /// This is a slight fib because we're not implementing Clone, and we aren't
+    /// doing that because we're not returning Self. We're returning a
+    /// Consumer<T, E> which you can wait on.
+    pub fn clone(&self) -> Consumer<T,E> {
+        Consumer { promise: self.promise.clone() }
+    }
+
 }
 
 impl<T, E> Default for Promise<T, E> {
@@ -95,7 +110,7 @@ impl<T, E> Default for Promise<T, E> {
     }
 }
 
-impl<T, E> Future for Promise<T, E> {
+impl<T, E> Future for Consumer<T, E> {
     type Output = Arc<Result<T, E>>;
 
     fn poll(
@@ -165,17 +180,16 @@ fn test_two_promises_out_resolve() {
 
 #[test]
 fn test_promise_out_reject() {
-    let op: Promise<String, String> = Promise::default();
-    let a = op.clone();
+    let a: Promise<String, String> = Promise::default();
+    let b = a.clone();
     let task1 = thread::spawn(|| {
         block_on(async {
-            println!("我等到了{:?}", a.await);
+            println!("我等到了{:?}", b.await);
         })
     });
-    let b = op.clone();
     let task2 = thread::spawn(|| {
         block_on(async {
-            println!("我发送了了{:?}", b.reject(String::from("reject!!")));
+            println!("我发送了了{:?}", a.reject(String::from("reject!!")));
         })
     });
     task1.join().expect("The task1 thread has panicked");

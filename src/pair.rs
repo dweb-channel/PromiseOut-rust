@@ -16,14 +16,17 @@ pub struct Promise<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
+pub struct Consumer<T, E> {
+    promise: Arc<Mutex<Inner<T, E>>>,
+}
+
 #[derive(Debug)]
 struct Inner<T, E> {
     value: Option<Result<T, E>>,
     waker: Option<Waker>,
 }
 
-impl<T, E> Promise<T, E>
-{
+impl<T, E> Promise<T, E> {
     #[allow(dead_code)]
     ///promiseOut.resolve
     ///
@@ -79,16 +82,16 @@ impl<T, E> Promise<T, E>
 }
 
 impl<T, E> Promise<T, E> {
-    pub fn pair() -> (Self, Self) {
+    pub fn pair() -> (Self, Consumer<T,E>) {
         let inner = Arc::new(Mutex::new(Inner {
                 value: None,
                 waker: None,
             }));
-        (Self { promise: inner.clone() }, Self { promise: inner })
+        (Self { promise: inner.clone() }, Consumer { promise: inner })
     }
 }
 
-impl<T, E> Future for Promise<T, E> {
+impl<T, E> Future for Consumer<T, E> {
     type Output = Result<T, E>;
 
     fn poll(
@@ -134,12 +137,12 @@ fn test_promise_out_reject() {
     let (a, b) = Promise::<String, String>::pair();
     let task1 = thread::spawn(|| {
         block_on(async {
-            println!("我等到了{:?}", a.await);
+            println!("我等到了{:?}", b.await);
         })
     });
     let task2 = thread::spawn(|| {
         block_on(async {
-            println!("我发送了了{:?}", b.reject(String::from("reject!!")));
+            println!("我发送了了{:?}", a.reject(String::from("reject!!")));
         })
     });
     task1.join().expect("The task1 thread has panicked");
