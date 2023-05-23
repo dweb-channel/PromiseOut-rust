@@ -13,12 +13,12 @@ pub mod promise_out;
 /// let op: PromiseOut<String,String> = PromiseOut::default();
 /// ```
 #[derive(Clone, Debug)]
-pub struct PromiseOut<T,E> {
-    promise: Arc<Mutex<Promise<T,E>>>,
+pub struct PromiseOut<T, E> {
+    promise: Arc<Mutex<Promise<T, E>>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct Promise<T,E> {
+pub struct Promise<T, E> {
     value: Option<Arc<Result<T, E>>>,
     waker: Vec<Waker>, // This was failing the two promise when only one waker
                        // was kept. Even though many docs insist you only need
@@ -26,10 +26,10 @@ pub struct Promise<T,E> {
                        // https://rust-lang.github.io/async-book/02_execution/03_wakeups.html
 }
 
-impl<T,E> PromiseOut<T,E>
+impl<T, E> PromiseOut<T, E>
 where
     T: Clone,
-    E: Clone
+    E: Clone,
 {
     #[allow(dead_code)]
     ///promiseOut.resolve
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<T,E> Default for PromiseOut<T,E> {
+impl<T, E> Default for PromiseOut<T, E> {
     fn default() -> Self {
         Self {
             promise: Arc::new(Mutex::new(Promise {
@@ -98,10 +98,7 @@ impl<T,E> Default for PromiseOut<T,E> {
     }
 }
 
-impl<T,E> Future for PromiseOut<T,E>
-where
-    T: Debug + Clone + 'static,
-{
+impl<T, E> Future for PromiseOut<T, E> {
     type Output = Arc<Result<T, E>>;
 
     fn poll(
@@ -110,10 +107,11 @@ where
     ) -> std::task::Poll<Self::Output> {
         let mut promise = self.promise.lock().unwrap();
         match promise.value {
-          Some(ref value) =>
-                    Poll::Ready(value.clone()),
-          None => { promise.waker.push(cx.waker().clone());
-                    Poll::Pending },
+            Some(ref value) => Poll::Ready(value.clone()),
+            None => {
+                promise.waker.push(cx.waker().clone());
+                Poll::Pending
+            }
         }
     }
 }
