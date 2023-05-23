@@ -9,22 +9,27 @@ pub mod promise_out;
 /// # Examples
 ///
 /// ```
-/// let op: PromiseOut<String> = PromiseOut::default();
+/// use promise_out::PromiseOut;
+/// let op: PromiseOut<String,String> = PromiseOut::default();
 /// ```
 #[derive(Clone, Debug)]
-pub struct PromiseOut<T> {
-    promise: Arc<Mutex<Promise<T>>>,
-}
-#[derive(Clone, Debug)]
-pub struct Promise<T> {
-    completed: bool,
-    value: Arc<Result<T, String>>,
-    waker: Option<Waker>,
+pub struct PromiseOut<T,E> {
+    promise: Arc<Mutex<Promise<T,E>>>,
 }
 
-impl<T> PromiseOut<T>
+#[derive(Clone, Debug)]
+pub struct Promise<T,E> {
+    value: Option<Arc<Result<T, E>>>,
+    waker: Vec<Waker>, // This was failing the two promise when only one waker
+                       // was kept. Even though many docs insist you only need
+                       // to wake the last waker. I don't get it.
+                       // https://rust-lang.github.io/async-book/02_execution/03_wakeups.html
+}
+
+impl<T,E> PromiseOut<T,E>
 where
     T: Clone,
+    E: Clone
 {
     #[allow(dead_code)]
     ///promiseOut.resolve
@@ -32,7 +37,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// let op: PromiseOut<String> = PromiseOut::default();
+    /// use promise_out::PromiseOut;
+    /// use futures::executor::block_on;
+    /// use std::thread;
+    /// let op: PromiseOut<String, String> = PromiseOut::default();
     /// let op_a  = op.clone();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
@@ -45,9 +53,8 @@ where
     /// ```
     pub fn resolve(self, value: T) {
         let mut promise = self.promise.lock().unwrap();
-        promise.completed = true;
-        promise.value = Arc::new(Ok(value));
-        if let Some(waker) = promise.waker.take() {
+        promise.value = Some(Arc::new(Ok(value)));
+        for waker in promise.waker.drain(..) {
             waker.wake()
         }
     }
@@ -56,7 +63,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// let op: PromiseOut<String> = PromiseOut::default();
+    /// use promise_out::PromiseOut;
+    /// use futures::executor::block_on;
+    /// use std::thread;
+    /// let op: PromiseOut<String, String> = PromiseOut::default();
     /// let op_a  = op.clone();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
@@ -68,46 +78,42 @@ where
     /// task2.join().expect("The task2 thread has panicked");
     /// ```
     #[allow(dead_code)]
-    pub fn reject(self, err: String) {
+    pub fn reject(self, err: E) {
         let mut promise = self.promise.lock().unwrap();
-        promise.completed = true;
-        promise.value = Arc::new(Err(err));
-        if let Some(waker) = promise.waker.take() {
+        promise.value = Some(Arc::new(Err(err)));
+        for waker in promise.waker.drain(..) {
             waker.wake()
         }
     }
 }
 
-impl<T> Default for PromiseOut<T> {
+impl<T,E> Default for PromiseOut<T,E> {
     fn default() -> Self {
         Self {
             promise: Arc::new(Mutex::new(Promise {
-                completed: false,
-                value: Arc::new(Err(String::from("init"))),
-                waker: None,
+                value: None,
+                waker: vec![],
             })),
         }
     }
 }
 
-impl<T> Future for PromiseOut<T>
+impl<T,E> Future for PromiseOut<T,E>
 where
     T: Debug + Clone + 'static,
 {
-    type Output = Arc<Result<T, String>>;
+    type Output = Arc<Result<T, E>>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let mut promsie = self.promise.lock().unwrap();
-        if promsie.completed {
-            let value = promsie.value.clone();
-            // let value = Ok(value);
-            Poll::Ready(value)
-        } else {
-            promsie.waker.replace(cx.waker().clone());
-            Poll::Pending
+        let mut promise = self.promise.lock().unwrap();
+        match promise.value {
+          Some(ref value) =>
+                    Poll::Ready(value.clone()),
+          None => { promise.waker.push(cx.waker().clone());
+                    Poll::Pending },
         }
     }
 }
@@ -120,7 +126,7 @@ use std::thread;
 #[allow(unused_must_use)]
 #[test]
 fn test_promise_out_resolve() {
-    let op: PromiseOut<String> = PromiseOut::default();
+    let op: PromiseOut<String, String> = PromiseOut::default();
     let op_a = op.clone();
     let task1 = thread::spawn(move || {
         block_on(async {
@@ -136,9 +142,35 @@ fn test_promise_out_resolve() {
     task2.join().expect("The task2 thread has panicked");
 }
 
+#[allow(unused_must_use)]
+#[test]
+fn test_two_promises_out_resolve() {
+    let op: PromiseOut<String, String> = PromiseOut::default();
+    let op_a = op.clone();
+    let op_b = op.clone();
+    let task1 = thread::spawn(move || {
+        block_on(async {
+            println!("我等到了{:?} task1", op_a.await);
+        })
+    });
+    let task2 = thread::spawn(move || {
+        block_on(async {
+            println!("我等到了{:?} task2", op_b.await);
+        })
+    });
+    let task3 = thread::spawn(move || {
+        block_on(async {
+            println!("我发送了了{:?} task3", op.resolve(String::from("🍓")));
+        })
+    });
+    task1.join().expect("The task1 thread has panicked");
+    task2.join().expect("The task2 thread has panicked");
+    task3.join().expect("The task3 thread has panicked");
+}
+
 #[test]
 fn test_promise_out_reject() {
-    let op: PromiseOut<String> = PromiseOut::default();
+    let op: PromiseOut<String, String> = PromiseOut::default();
     let a = op.clone();
     let task1 = thread::spawn(|| {
         block_on(async {
