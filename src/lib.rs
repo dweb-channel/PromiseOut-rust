@@ -10,8 +10,8 @@ pub mod pair;
 /// # Examples
 ///
 /// ```
-/// use promise_out::Producer;
-/// let op: Producer<String,String> = Producer::default();
+/// use promise_out::{Promise, Producer};
+/// let (producer, consumer) = Producer::<String, String>::new();
 /// ```
 #[derive(Debug)]
 pub struct Producer<T, E> {
@@ -105,22 +105,16 @@ impl<T, E> Promise for Producer<T,E> {
     /// doing that because we're not returning Self. We're returning a
     /// Consumer<T, E> which you can wait on.
     fn new() -> (Self, Self::Waiter) {
-        let producer = Producer::default();
+        let producer = Self {
+                            promise: Arc::new(Mutex::new(Inner {
+                                value: None,
+                                waker: vec![],
+                            })),
+                        };
         let consumer = Consumer { promise: producer.promise.clone() };
         (producer, consumer)
     }
 
-}
-
-impl<T, E> Default for Producer<T, E> {
-    fn default() -> Self {
-        Self {
-            promise: Arc::new(Mutex::new(Inner {
-                value: None,
-                waker: vec![],
-            })),
-        }
-    }
 }
 
 impl<T, E> Future for Consumer<T, E> {
