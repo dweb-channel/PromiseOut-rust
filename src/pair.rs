@@ -2,17 +2,19 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::{future::Future, task::Poll};
+use crate::Promise;
 
 ///promiseOut
 ///
 /// # Examples
 ///
 /// ```
-/// use promise_out::pair::Promise;
-/// let (producer, consumer) = Promise::<String,String>::pair();
+/// use promise_out::pair::Producer;
+/// use promise_out::Promise;
+/// let (producer, consumer) = Producer::<String,String>::new();
 /// ```
 #[derive(Debug)]
-pub struct Promise<T, E> {
+pub struct Producer<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
@@ -26,17 +28,21 @@ struct Inner<T, E> {
     waker: Option<Waker>,
 }
 
-impl<T, E> Promise<T, E> {
+impl<T, E> Promise for Producer<T, E> {
+    type Output = T;
+    type Error = E;
+    type Waiter = Consumer<T,E>;
     #[allow(dead_code)]
     ///promiseOut.resolve
     ///
     /// # Examples
     ///
     /// ```
-    /// use promise_out::pair::Promise;
+    /// use promise_out::pair::Producer;
+    /// use promise_out::Promise;
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Promise::<String, String>::pair();
+    /// let (op, op_a) = Producer::<String, String>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -46,7 +52,7 @@ impl<T, E> Promise<T, E> {
     /// task1.join().expect("The task1 thread has panicked");
     /// task2.join().expect("The task2 thread has panicked");
     /// ```
-    pub fn resolve(self, value: T) {
+    fn resolve(self, value: T) {
         let mut promise = self.promise.lock().unwrap();
         promise.value = Some(Ok(value));
         if let Some(waker) = promise.waker.take() {
@@ -58,10 +64,11 @@ impl<T, E> Promise<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use promise_out::pair::Promise;
+    /// use promise_out::pair::Producer;
+    /// use promise_out::Promise;
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Promise::<String, String>::pair();
+    /// let (op, op_a) = Producer::<String, String>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -72,17 +79,15 @@ impl<T, E> Promise<T, E> {
     /// task2.join().expect("The task2 thread has panicked");
     /// ```
     #[allow(dead_code)]
-    pub fn reject(self, err: E) {
+    fn reject(self, err: E) {
         let mut promise = self.promise.lock().unwrap();
         promise.value = Some(Err(err));
         if let Some(waker) = promise.waker.take() {
             waker.wake()
         }
     }
-}
 
-impl<T, E> Promise<T, E> {
-    pub fn pair() -> (Self, Consumer<T,E>) {
+    fn new() -> (Self, Consumer<T,E>) {
         let inner = Arc::new(Mutex::new(Inner {
                 value: None,
                 waker: None,
@@ -117,7 +122,7 @@ use std::thread;
 #[allow(unused_must_use)]
 #[test]
 fn test_promise_out_resolve() {
-    let (op, op_a) = Promise::<String, String>::pair();
+    let (op, op_a) = Producer::<String, String>::new();
     let task1 = thread::spawn(move || {
         block_on(async {
             println!("我等到了{:?}", op_a.await);
@@ -134,7 +139,7 @@ fn test_promise_out_resolve() {
 
 #[test]
 fn test_promise_out_reject() {
-    let (a, b) = Promise::<String, String>::pair();
+    let (a, b) = Producer::<String, String>::new();
     let task1 = thread::spawn(|| {
         block_on(async {
             println!("我等到了{:?}", b.await);

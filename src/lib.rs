@@ -10,11 +10,11 @@ pub mod pair;
 /// # Examples
 ///
 /// ```
-/// use promise_out::Promise;
-/// let op: Promise<String,String> = Promise::default();
+/// use promise_out::Producer;
+/// let op: Producer<String,String> = Producer::default();
 /// ```
 #[derive(Debug)]
-pub struct Promise<T, E> {
+pub struct Producer<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
@@ -32,18 +32,30 @@ struct Inner<T, E> {
                        // https://rust-lang.github.io/async-book/02_execution/03_wakeups.html
 }
 
-impl<T, E> Promise<T, E> {
+pub trait Promise {
+    type Output;
+    type Error;
+    type Waiter : Future;
+
+    fn resolve(self, value: Self::Output);
+    fn reject(self, err: Self::Error);
+    fn new() -> (Self, Self::Waiter) where Self: Sized;
+}
+
+impl<T, E> Promise for Producer<T,E> {
+    type Output = T;
+    type Error = E;
+    type Waiter = Consumer<T,E>;
     #[allow(dead_code)]
     ///promiseOut.resolve
     ///
     /// # Examples
     ///
     /// ```
-    /// use promise_out::Promise;
+    /// use promise_out::{Promise, Producer};
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let op: Promise<String, String> = Promise::default();
-    /// let op_a  = op.clone();
+    /// let (op, op_a) = Producer::<String, ()>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -53,7 +65,7 @@ impl<T, E> Promise<T, E> {
     /// task1.join().expect("The task1 thread has panicked");
     /// task2.join().expect("The task2 thread has panicked");
     /// ```
-    pub fn resolve(self, value: T) {
+    fn resolve(self, value: T) {
         let mut promise = self.promise.lock().unwrap();
         promise.value = Some(Arc::new(Ok(value)));
         for waker in promise.waker.drain(..) {
@@ -65,11 +77,10 @@ impl<T, E> Promise<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use promise_out::Promise;
+    /// use promise_out::{Promise, Producer};
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let op: Promise<String, String> = Promise::default();
-    /// let op_a  = op.clone();
+    /// let (op, op_a) = Producer::<(), String>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -80,7 +91,7 @@ impl<T, E> Promise<T, E> {
     /// task2.join().expect("The task2 thread has panicked");
     /// ```
     #[allow(dead_code)]
-    pub fn reject(self, err: E) {
+    fn reject(self, err: E) {
         let mut promise = self.promise.lock().unwrap();
         promise.value = Some(Arc::new(Err(err)));
         for waker in promise.waker.drain(..) {
@@ -88,18 +99,20 @@ impl<T, E> Promise<T, E> {
         }
     }
 
-    /// promise.clone
+    /// promise.new
     ///
     /// This is a slight fib because we're not implementing Clone, and we aren't
     /// doing that because we're not returning Self. We're returning a
     /// Consumer<T, E> which you can wait on.
-    pub fn clone(&self) -> Consumer<T,E> {
-        Consumer { promise: self.promise.clone() }
+    fn new() -> (Self, Self::Waiter) {
+        let producer = Producer::default();
+        let consumer = Consumer { promise: producer.promise.clone() };
+        (producer, consumer)
     }
 
 }
 
-impl<T, E> Default for Promise<T, E> {
+impl<T, E> Default for Producer<T, E> {
     fn default() -> Self {
         Self {
             promise: Arc::new(Mutex::new(Inner {
@@ -136,8 +149,7 @@ use std::thread;
 #[allow(unused_must_use)]
 #[test]
 fn test_promise_out_resolve() {
-    let op: Promise<String, String> = Promise::default();
-    let op_a = op.clone();
+    let (op, op_a) = Producer::<String, ()>::new();
     let task1 = thread::spawn(move || {
         block_on(async {
             println!("我等到了{:?}", op_a.await);
@@ -155,8 +167,7 @@ fn test_promise_out_resolve() {
 #[allow(unused_must_use)]
 #[test]
 fn test_promise_resolve_twice() {
-    let a: Promise<String, String> = Promise::default();
-    let b = a.clone();
+    let (a, _b) = Producer::<String, ()>::new();
     a.resolve("hi".into());
     // Not possible. a is consumed.
     // a.resolve("hi".into());
@@ -165,9 +176,8 @@ fn test_promise_resolve_twice() {
 #[allow(unused_must_use)]
 #[test]
 fn test_two_promises_out_resolve() {
-    let op: Promise<String, String> = Promise::default();
-    let op_a = op.clone();
-    let op_b = op.clone();
+    let (op, op_a) = Producer::<String, ()>::new();
+    let op_b = op_a.clone();
     let task1 = thread::spawn(move || {
         block_on(async {
             println!("我等到了{:?} task1", op_a.await);
@@ -190,8 +200,7 @@ fn test_two_promises_out_resolve() {
 
 #[test]
 fn test_promise_out_reject() {
-    let a: Promise<String, String> = Promise::default();
-    let b = a.clone();
+    let (a, b) = Producer::<String, String>::new();
     let task1 = thread::spawn(|| {
         block_on(async {
             println!("我等到了{:?}", b.await);
