@@ -122,10 +122,14 @@ impl<T, E> Future for Consumer<T, E> {
     }
 }
 
+#[cfg(test)]
+mod tests {
 #[allow(unused_imports)]
 use futures::executor::block_on;
 #[allow(unused_imports)]
 use std::thread;
+use super::Producer;
+use crate::Promise;
 
 #[allow(unused_must_use)]
 #[test]
@@ -160,4 +164,5 @@ fn test_promise_out_reject() {
     });
     task1.join().expect("The task1 thread has panicked");
     task2.join().expect("The task2 thread has panicked");
+}
 }

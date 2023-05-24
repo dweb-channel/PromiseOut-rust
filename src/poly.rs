@@ -9,7 +9,7 @@ use crate::Promise;
 /// # Examples
 ///
 /// ```
-/// use promise_out::{Promise, pair::Producer};
+/// use promise_out::{Promise, poly::Producer};
 /// use futures::executor::block_on;
 /// use std::thread;
 /// let (promise, consumer) = Producer::<String, String>::new();
@@ -137,10 +137,14 @@ impl<T, E> Future for Consumer<T, E> {
     }
 }
 
+#[cfg(test)]
+mod tests {
 #[allow(unused_imports)]
 use futures::executor::block_on;
 #[allow(unused_imports)]
 use std::thread;
+use super::Producer;
+use crate::Promise;
 
 #[allow(unused_must_use)]
 #[test]
@@ -158,15 +162,6 @@ fn test_promise_out_resolve() {
     });
     task1.join().expect("The task1 thread has panicked");
     task2.join().expect("The task2 thread has panicked");
-}
-
-#[allow(unused_must_use)]
-#[test]
-fn test_promise_resolve_twice() {
-    let (a, _b) = Producer::<String, ()>::new();
-    a.resolve("hi".into());
-    // Not possible. a is consumed.
-    // a.resolve("hi".into());
 }
 
 #[allow(unused_must_use)]
@@ -209,4 +204,15 @@ fn test_promise_out_reject() {
     });
     task1.join().expect("The task1 thread has panicked");
     task2.join().expect("The task2 thread has panicked");
+}
+
+#[allow(unused_must_use)]
+#[test]
+fn test_promise_resolve_twice() {
+    let (a, _b) = Producer::<String, ()>::new();
+    a.resolve("hi".into());
+    // Not possible. a is consumed.
+    // a.resolve("hi".into());
+}
+
 }
