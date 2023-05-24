@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::{future::Future, task::{Poll, Waker}};
 use crate::Promise;
 
-/// This `pair::Producer` promise can only have one consumer. The consumer
-/// returns a `Result<T,E>`.
+/// This `poly::Producer` promise can have many consumers. The consumers may be
+/// cloned. The consumers return a `Arc<Result<T,E>>`.
 ///
 /// # Examples
 ///
@@ -13,30 +13,38 @@ use crate::Promise;
 /// use futures::executor::block_on;
 /// use std::thread;
 /// let (promise, consumer) = Producer::<String, String>::new();
-///
+/// let consumer2 = consumer.clone();
 /// let task1 = thread::spawn(move || block_on(async {
-///     println!("Received {:?}",  consumer.await);
+///     println!("Received on task 1 {:?}",  consumer.await);
+/// }));
+/// let task2 = thread::spawn(move || block_on(async {
+///     println!("Received on task 2 {:?}",  consumer2.await);
 /// }));
 /// promise.resolve("Hi".into());
 /// task1.join().expect("The task1 thread has panicked.");
+/// task2.join().expect("The task2 thread has panicked.");
 /// ```
 #[derive(Debug)]
 pub struct Producer<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Consumer<T, E> {
     promise: Arc<Mutex<Inner<T, E>>>,
 }
 
 #[derive(Debug)]
 struct Inner<T, E> {
-    value: Option<Result<T, E>>,
-    waker: Option<Waker>,
+    value: Option<Arc<Result<T, E>>>,
+    waker: Vec<Waker>, // This was failing the two promise when only one waker
+                       // was kept. Even though many docs insist you only need
+                       // to wake the last waker. I don't get it.
+                       // https://rust-lang.github.io/async-book/02_execution/03_wakeups.html
 }
 
-impl<T, E> Promise for Producer<T, E> {
+
+impl<T, E> Promise for Producer<T,E> {
     type Output = T;
     type Error = E;
     type Waiter = Consumer<T,E>;
@@ -46,11 +54,10 @@ impl<T, E> Promise for Producer<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use promise_out::pair::Producer;
-    /// use promise_out::Promise;
+    /// use promise_out::{Promise, poly::Producer};
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Producer::<String, String>::new();
+    /// let (op, op_a) = Producer::<String, ()>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -62,8 +69,8 @@ impl<T, E> Promise for Producer<T, E> {
     /// ```
     fn resolve(self, value: T) {
         let mut promise = self.promise.lock().unwrap();
-        promise.value = Some(Ok(value));
-        if let Some(waker) = promise.waker.take() {
+        promise.value = Some(Arc::new(Ok(value)));
+        for waker in promise.waker.drain(..) {
             waker.wake()
         }
     }
@@ -72,11 +79,10 @@ impl<T, E> Promise for Producer<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use promise_out::pair::Producer;
-    /// use promise_out::Promise;
+    /// use promise_out::{Promise, poly::Producer};
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Producer::<String, String>::new();
+    /// let (op, op_a) = Producer::<(), String>::new();
     /// let task1 = thread::spawn(move || block_on(async {
     ///     println!("我等到了{:?}",  op_a.await);
     /// }));
@@ -89,33 +95,42 @@ impl<T, E> Promise for Producer<T, E> {
     #[allow(dead_code)]
     fn reject(self, err: E) {
         let mut promise = self.promise.lock().unwrap();
-        promise.value = Some(Err(err));
-        if let Some(waker) = promise.waker.take() {
+        promise.value = Some(Arc::new(Err(err)));
+        for waker in promise.waker.drain(..) {
             waker.wake()
         }
     }
 
-    fn new() -> (Self, Consumer<T,E>) {
-        let inner = Arc::new(Mutex::new(Inner {
-                value: None,
-                waker: None,
-            }));
-        (Self { promise: inner.clone() }, Consumer { promise: inner })
+    /// promise.new
+    ///
+    /// This is a slight fib because we're not implementing Clone, and we aren't
+    /// doing that because we're not returning Self. We're returning a
+    /// Consumer<T, E> which you can wait on.
+    fn new() -> (Self, Self::Waiter) {
+        let producer = Self {
+                            promise: Arc::new(Mutex::new(Inner {
+                                value: None,
+                                waker: vec![],
+                            })),
+                        };
+        let consumer = Consumer { promise: producer.promise.clone() };
+        (producer, consumer)
     }
+
 }
 
 impl<T, E> Future for Consumer<T, E> {
-    type Output = Result<T, E>;
+    type Output = Arc<Result<T, E>>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut promise = self.promise.lock().unwrap();
-        match promise.value.take() {
-            Some(value) => Poll::Ready(value),
+        match promise.value {
+            Some(ref value) => Poll::Ready(value.clone()),
             None => {
-                promise.waker.replace(cx.waker().clone());
+                promise.waker.push(cx.waker().clone());
                 Poll::Pending
             }
         }
@@ -130,7 +145,7 @@ use std::thread;
 #[allow(unused_must_use)]
 #[test]
 fn test_promise_out_resolve() {
-    let (op, op_a) = Producer::<String, String>::new();
+    let (op, op_a) = Producer::<String, ()>::new();
     let task1 = thread::spawn(move || {
         block_on(async {
             println!("我等到了{:?}", op_a.await);
@@ -143,6 +158,40 @@ fn test_promise_out_resolve() {
     });
     task1.join().expect("The task1 thread has panicked");
     task2.join().expect("The task2 thread has panicked");
+}
+
+#[allow(unused_must_use)]
+#[test]
+fn test_promise_resolve_twice() {
+    let (a, _b) = Producer::<String, ()>::new();
+    a.resolve("hi".into());
+    // Not possible. a is consumed.
+    // a.resolve("hi".into());
+}
+
+#[allow(unused_must_use)]
+#[test]
+fn test_two_promises_out_resolve() {
+    let (op, op_a) = Producer::<String, ()>::new();
+    let op_b = op_a.clone();
+    let task1 = thread::spawn(move || {
+        block_on(async {
+            println!("我等到了{:?} task1", op_a.await);
+        })
+    });
+    let task2 = thread::spawn(move || {
+        block_on(async {
+            println!("我等到了{:?} task2", op_b.await);
+        })
+    });
+    let task3 = thread::spawn(move || {
+        block_on(async {
+            println!("我发送了了{:?} task3", op.resolve(String::from("🍓")));
+        })
+    });
+    task1.join().expect("The task1 thread has panicked");
+    task2.join().expect("The task2 thread has panicked");
+    task3.join().expect("The task3 thread has panicked");
 }
 
 #[test]
