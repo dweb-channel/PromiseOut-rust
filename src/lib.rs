@@ -17,16 +17,24 @@ use std::future::Future;
 /// promise.resolve("Hi".into());
 /// task1.join().expect("The task1 thread has panicked.");
 /// ```
-pub trait Promise {
-    type Output;
-    type Error;
+pub trait Promise<T> {
     type Waiter : Future;
 
-    fn resolve(self, value: Self::Output);
-    fn reject(self, err: Self::Error);
+    /// Resolve the promise's value.
+    ///
+    /// Typically a promise library will also offer a `reject()` method to serve
+    /// a user specified error. However, returning an `Err(E)` for a
+    /// `Promise<Result<T,E>>` serves the same purpose.
+    fn resolve(self, value: T);
+    // fn reject(self, value: Error);
     fn new() -> (Self, Self::Waiter) where Self: Sized;
+}
+
+#[derive(Debug)]
+pub enum Error {
+    ProducerDropped,
 }
 
 pub mod promise_out;
 pub mod pair;
-pub mod poly;
+// pub mod poly;
