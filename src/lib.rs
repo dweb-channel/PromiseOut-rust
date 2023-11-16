@@ -35,6 +35,13 @@ pub enum Error {
     ProducerDropped,
 }
 
+#[derive(Debug)]
+enum WakerState {
+    Fresh,
+    Tainted,
+}
+
+
 pub mod promise_out;
 pub mod pair;
-// pub mod poly;
+pub mod poly;

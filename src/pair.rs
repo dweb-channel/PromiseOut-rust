@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, task::{Poll, Waker}};
-use crate::{Promise, Error};
+use crate::{Promise, Error, WakerState};
 
 /// This `pair::Producer` promise can only have one consumer. The consumer
 /// returns a `Result<T,Error>`. An error is returned if the only producer has
@@ -29,12 +29,6 @@ pub struct Producer<T> {
 #[derive(Debug)]
 pub struct Consumer<T> {
     promise: Arc<Mutex<Inner<T>>>,
-}
-
-#[derive(Debug)]
-enum WakerState {
-    Fresh,
-    Tainted,
 }
 
 #[derive(Debug)]
