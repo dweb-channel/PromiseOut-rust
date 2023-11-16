@@ -4,7 +4,8 @@ use std::{future::Future, task::{Poll, Waker}};
 use crate::{Promise, Error};
 
 /// This `pair::Producer` promise can only have one consumer. The consumer
-/// returns a `Result<T,E>`.
+/// returns a `Result<T,Error>`. An error is returned if the only producer has
+/// been dropped; thus it will never resolve the promise.
 ///
 /// # Examples
 ///
@@ -71,34 +72,7 @@ impl<T> Promise<T> for Producer<T> {
             waker.wake()
         }
     }
-    ///promiseOut.reject
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promise_out::pair::Producer;
-    /// use promise_out::Promise;
-    /// use futures::executor::block_on;
-    /// use std::thread;
-    /// let (op, op_a) = Producer::<Result<String, String>>::new();
-    /// let task1 = thread::spawn(move || block_on(async {
-    ///     println!("我等到了{:?}",  op_a.await.unwrap());
-    /// }));
-    /// let task2 = thread::spawn(move || block_on(async {
-    // ///     println!("我发送了{:?}", op.reject(String::from("💥")));
-    ///     println!("我发送了{:?}", op.resolve(Err(String::from("💥"))));
-    /// }));
-    /// task1.join().expect("The task1 thread has panicked");
-    /// task2.join().expect("The task2 thread has panicked");
-    /// ```
-    // #[allow(dead_code)]
-    // fn reject(self, err: Error) {
-    //     let mut promise = self.promise.lock().unwrap();
-    //     promise.value = Some(Err(err));
-    //     if let Some(waker) = promise.waker.take() {
-    //         waker.wake()
-    //     }
-    // }
+
     fn new() -> (Self, Consumer<T>) {
         let inner = Arc::new(Mutex::new(Inner {
                 value: None,
@@ -109,11 +83,10 @@ impl<T> Promise<T> for Producer<T> {
 }
 
 impl<T> Drop for Producer<T> {
-    /// If this is an unresolved producer, wake with error.
+    /// If this is an unresolved producer, wake with an error.
     fn drop(&mut self) {
         let mut promise = self.promise.lock().unwrap();
         if let Ok(waker) = std::mem::replace(&mut promise.waker, Err(WakerState::Tainted)) {
-            // promise.value = Some(Err(Error::ProducerDropped));
             waker.wake()
         }
     }
