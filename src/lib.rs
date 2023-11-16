@@ -9,7 +9,7 @@ use std::future::Future;
 /// use promise_out::{Promise, pair::Producer};
 /// use futures::executor::block_on;
 /// use std::thread;
-/// let (promise, consumer) = Producer::<String, String>::new();
+/// let (promise, consumer) = Producer::<String>::new();
 ///
 /// let task1 = thread::spawn(move || block_on(async {
 ///     println!("Received {:?}",  consumer.await);

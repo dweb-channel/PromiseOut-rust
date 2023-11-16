@@ -12,7 +12,7 @@ use crate::{Promise, Error};
 /// use promise_out::{Promise, pair::Producer};
 /// use futures::executor::block_on;
 /// use std::thread;
-/// let (promise, consumer) = Producer::<String, String>::new();
+/// let (promise, consumer) = Producer::<String>::new();
 ///
 /// let task1 = thread::spawn(move || block_on(async {
 ///     println!("Received {:?}",  consumer.await);
@@ -31,14 +31,18 @@ pub struct Consumer<T> {
 }
 
 #[derive(Debug)]
+enum WakerState {
+    Fresh,
+    Tainted,
+}
+
+#[derive(Debug)]
 struct Inner<T> {
     value: Option<Result<T,Error>>,
-    waker: Option<Waker>,
+    waker: Result<Waker, WakerState>,
 }
 
 impl<T> Promise<T> for Producer<T> {
-    // type Output = T;
-    // type Error = E;
     type Waiter = Consumer<T>;
     #[allow(dead_code)]
     ///promiseOut.resolve
@@ -50,9 +54,9 @@ impl<T> Promise<T> for Producer<T> {
     /// use promise_out::Promise;
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Producer::<String, String>::new();
+    /// let (op, op_a) = Producer::<String>::new();
     /// let task1 = thread::spawn(move || block_on(async {
-    ///     println!("我等到了{:?}",  op_a.await);
+    ///     println!("我等到了{:?}",  op_a.await.unwrap());
     /// }));
     /// let task2 = thread::spawn(move || block_on(async {
     ///     println!("我发送了{:?}", op.resolve(String::from("🍓")));
@@ -63,7 +67,7 @@ impl<T> Promise<T> for Producer<T> {
     fn resolve(self, value: T) {
         let mut promise = self.promise.lock().unwrap();
         promise.value = Some(Ok(value));
-        if let Some(waker) = promise.waker.take() {
+        if let Ok(waker) = std::mem::replace(&mut promise.waker, Err(WakerState::Tainted)) {
             waker.wake()
         }
     }
@@ -76,12 +80,13 @@ impl<T> Promise<T> for Producer<T> {
     /// use promise_out::Promise;
     /// use futures::executor::block_on;
     /// use std::thread;
-    /// let (op, op_a) = Producer::<String, String>::new();
+    /// let (op, op_a) = Producer::<Result<String, String>>::new();
     /// let task1 = thread::spawn(move || block_on(async {
-    ///     println!("我等到了{:?}",  op_a.await);
+    ///     println!("我等到了{:?}",  op_a.await.unwrap());
     /// }));
     /// let task2 = thread::spawn(move || block_on(async {
-    ///     println!("我发送了{:?}", op.reject(String::from("💥")));
+    // ///     println!("我发送了{:?}", op.reject(String::from("💥")));
+    ///     println!("我发送了{:?}", op.resolve(Err(String::from("💥"))));
     /// }));
     /// task1.join().expect("The task1 thread has panicked");
     /// task2.join().expect("The task2 thread has panicked");
@@ -97,17 +102,18 @@ impl<T> Promise<T> for Producer<T> {
     fn new() -> (Self, Consumer<T>) {
         let inner = Arc::new(Mutex::new(Inner {
                 value: None,
-                waker: None,
+                waker: Err(WakerState::Fresh),
             }));
         (Self { promise: inner.clone() }, Consumer { promise: inner })
     }
 }
 
 impl<T> Drop for Producer<T> {
+    /// If this is an unresolved producer, wake with error.
     fn drop(&mut self) {
         let mut promise = self.promise.lock().unwrap();
-        if let Some(waker) = promise.waker.take() {
-            promise.value = Some(Err(Error::ProducerDropped));
+        if let Ok(waker) = std::mem::replace(&mut promise.waker, Err(WakerState::Tainted)) {
+            // promise.value = Some(Err(Error::ProducerDropped));
             waker.wake()
         }
     }
@@ -124,8 +130,10 @@ impl<T> Future for Consumer<T> {
         match promise.value.take() {
             Some(value) => Poll::Ready(value),
             None => {
-                promise.waker.replace(cx.waker().clone());
-                Poll::Pending
+                match std::mem::replace(&mut promise.waker, Ok(cx.waker().clone())) {
+                    Err(WakerState::Tainted) => Poll::Ready(Err(Error::ProducerDropped)),
+                    _ => Poll::Pending
+                }
             }
         }
     }
@@ -159,7 +167,7 @@ fn test_promise_out_resolve() {
 }
 
 #[allow(unused_must_use)]
-#[should_panic(expected = "The task1 thread has panicked")]
+// #[should_panic(expected = "The task1 thread has panicked")]
 #[test]
 fn test_promise_out_unresolved() {
     let (op, op_a) = Producer::<String>::new();
@@ -170,13 +178,15 @@ fn test_promise_out_unresolved() {
     });
     let task2 = thread::spawn(move || {
         block_on(async {
-            // Ensure we move the producer into this thread.
-            let _op = op;
+            // Ensure we move the producer into this thread but we never resolve
+            // it.
+            // let _op = op;
+            std::mem::drop(op);
             // println!("我发送了了{:?}", op.resolve(String::from("🍓")));
         })
     });
-    task1.join().expect("The task1 thread has panicked");
     task2.join().expect("The task2 thread has panicked");
+    assert!(task1.join().is_err());
 }
 
 #[allow(unused_must_use)]
@@ -204,7 +214,7 @@ fn test_promise_out_reject() {
     let (a, b) = Producer::<Result<String, String>>::new();
     let task1 = thread::spawn(|| {
         block_on(async {
-            println!("我等到了{:?}", b.await);
+            println!("我等到了{:?}", b.await.unwrap());
         })
     });
     let task2 = thread::spawn(|| {
