@@ -1,3 +1,5 @@
+//! pair implements a single-producer, single-consumer promise. Neither the producer
+//! nor the consumer can be cloned.
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, task::{Poll, Waker}};

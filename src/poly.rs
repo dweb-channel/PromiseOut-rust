@@ -1,3 +1,5 @@
+//! poly implements a single-producer, multi-consumer promise. The producer
+//! may be cloned but the consumer can not be cloned.
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, task::{Poll, Waker}};
