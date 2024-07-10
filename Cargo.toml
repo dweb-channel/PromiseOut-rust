@@ -1,12 +1,15 @@
 [package]
 name = "promise_out"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 description = "promiseOut version for rust"
-authors = ["waterbang <water_bang@163.com>"]
+authors = ["waterbang <water_bang@163.com>", "Shane Celis <shane.celis@gmail.com>"]
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dev-dependencies]
 futures = "0.3"
+
+[dependencies]
+thiserror = "1.0.61"

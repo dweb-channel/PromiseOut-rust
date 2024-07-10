@@ -1,6 +1,7 @@
 
 #![doc = include_str!("../README.md")]
 use std::future::Future;
+use thiserror::Error;
 
 /// The trait for a promise.
 pub trait Promise<T> {
@@ -17,8 +18,9 @@ pub trait Promise<T> {
     fn new() -> (Self, Self::Waiter) where Self: Sized;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum Error {
+    #[error("producer dropped")]
     ProducerDropped,
 }
 
