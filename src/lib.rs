@@ -1,11 +1,10 @@
-
 #![doc = include_str!("../README.md")]
 use std::future::Future;
 use thiserror::Error;
 
 /// The trait for a promise.
 pub trait Promise<T> {
-    type Waiter : Future;
+    type Waiter: Future;
 
     /// Resolve the promise's value.
     ///
@@ -15,7 +14,9 @@ pub trait Promise<T> {
     fn resolve(self, value: T);
 
     /// Return a (producer, consumer) pair.
-    fn new() -> (Self, Self::Waiter) where Self: Sized;
+    fn new() -> (Self, Self::Waiter)
+    where
+        Self: Sized;
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]

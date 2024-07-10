@@ -1,14 +1,15 @@
 //! A channel promise uses a multi-producer, single-consumer channel as its
 //! backend. This allows for the Producer to be cloned but not the Consumer.
 //!
+use crate::{Error, Promise, WakerState};
 use std::{
-    future::Future, task::{Poll, Waker},
+    future::Future,
     sync::{
-        mpsc::{channel, Receiver, RecvError, TryRecvError, Sender},
+        mpsc::{channel, Receiver, Sender, TryRecvError},
         Arc, Mutex,
-    }
+    },
+    task::{Poll, Waker},
 };
-use crate::{Promise, Error, WakerState};
 #[derive(Debug, Clone)]
 pub struct Producer<T> {
     sender: Sender<T>,
@@ -39,10 +40,10 @@ impl<T> Future for Consumer<T> {
                 let mut promise = self.promise.lock().unwrap();
                 match std::mem::replace(&mut promise.waker, Ok(cx.waker().clone())) {
                     Err(WakerState::Tainted) => Poll::Ready(Err(Error::ProducerDropped)),
-                    _ => Poll::Pending
+                    _ => Poll::Pending,
                 }
             }
-            Err(TryRecvError::Disconnected) => Poll::Ready(Err(Error::ProducerDropped))
+            Err(TryRecvError::Disconnected) => Poll::Ready(Err(Error::ProducerDropped)),
         }
     }
 }
@@ -57,12 +58,23 @@ impl<T> Promise<T> for Producer<T> {
         }
     }
 
-    fn new() -> (Self, Self::Waiter) where Self: Sized {
+    fn new() -> (Self, Self::Waiter)
+    where
+        Self: Sized,
+    {
         let (tx, rx) = channel();
         let inner = Arc::new(Mutex::new(Inner {
-                waker: Err(WakerState::Fresh),
-            }));
-        (Producer { sender: tx,   promise: inner.clone() },
-         Consumer { receiver: rx, promise:  inner })
+            waker: Err(WakerState::Fresh),
+        }));
+        (
+            Producer {
+                sender: tx,
+                promise: inner.clone(),
+            },
+            Consumer {
+                receiver: rx,
+                promise: inner,
+            },
+        )
     }
 }
